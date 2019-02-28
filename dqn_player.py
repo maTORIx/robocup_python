@@ -3,6 +3,7 @@ import threading
 import sys
 import json
 import random
+import numpy as np
 
 import message_utils
 import status_utils
@@ -11,13 +12,12 @@ import see_message_utils
 from commands import move_kickoff
 import dqn
 
+import data_writer
+
 # logger 定義
 import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
-
-LERNING_LATE = 0.5
-GAMMA = 0.995
 
 stream_handler = logging.StreamHandler()
 stream_handler.setLevel(logging.DEBUG)
@@ -41,11 +41,15 @@ class Player(threading.Thread):
         self.episode_finished = True
         self.next_reward = 0
         self.last_command = ''
+        self.data_file = data_writer.open_data_file()
+        self.inferences = [[0] * 13] * 3 #kuso code
+        self.last_state = np.zeros((294,))
 
 
     def send(self, command):
         if len(command) == 0:
             return
+        data_writer.when_send_command(self.data_file, command)
         command = command + "\0"
         try:
             to_byte_command = command.encode(encoding='utf_8')
@@ -83,6 +87,7 @@ class Player(threading.Thread):
     def run(self):
         while True:
             message = self.receive()
+            data_writer.when_receive_message(self.data_file, message)
             parsed_message = message_utils.parse_message(message)
             self.analyzeMessage(parsed_message)
     
@@ -115,15 +120,28 @@ class Player(threading.Thread):
             if self.episode_finished:
                 self.episode_finished = False
             # reward = message_utils.calc_reward_from_see_message(message, self) + self.next_reward
-            reward = self.get_reward(message)
-            suggest_command = self.calc_suggest_command(message)
-            suggest_command = None
-            command = self.dqn(message_utils.parse_see_message_to_data(message, self), reward, suggest_command=suggest_command)
+            self.inference_command(message)
 
-            # self.next_reward = message_utils.calc_next_reward(command, message, self.last_command)
-            self.last_command = command
             
-            self.send(command)
+    def inference_command(self, message):
+        state = self.get_state(message)
+        reward = self.get_reward(message)
+        suggest_command = self.calc_suggest_command(message)
+        suggest_command = None
+        command, inference = self.dqn(state, reward, suggest_command=suggest_command)
+        # self.next_reward = message_utils.calc_next_reward(command, message, self.last_command)
+        
+        self.inferences.append(inference)
+        self.last_state = state
+        self.last_command = command
+        
+        self.send(command)
+        
+    def get_state(self, message):
+        # kuso code
+        see_state = message_utils.parse_see_message_to_data(message,self)
+        last_see_state = self.last_state[0:len(see_state)]
+        return np.concatenate([see_state, last_see_state, self.inferences[-3], self.inferences[-2], self.inferences[-1]])
     
     def calc_suggest_command(self, message):
         ball_visible, ball_location = see_message_utils.ball_is_visible(message)

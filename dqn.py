@@ -99,7 +99,7 @@ BATCH_SIZE = 20
 TRAIN_INTERVAL = 10
 GAMMA = 0.97
 acts_num = 13
-obs_num = 294
+obs_num = 294 * 2 + acts_num * 3
 
 class NN(nn.Module):
     def __init__(self):
@@ -143,8 +143,9 @@ class Estimater():
     
     def __call__(self, state, state_reward=0, suggest_command=None):
         input_state = np.array(state, dtype='float32')
-        command, act_command ,reward_rate = self.predict(input_state, suggest_command)
-        # input datas to episode for training
+        command, act_command ,reward_rate, inference_result = self.predict(input_state, suggest_command)
+
+        # input datas to self.episode for training
         self.total_reward += state_reward
         self.call_count += 1
         self.episode.append([input_state, act_command, reward_rate, None, None])
@@ -158,7 +159,7 @@ class Estimater():
 
         if self.call_count % 500 == 0 and not self.saved:
             self.save()
-        return command
+        return command, inference_result
     
     def set_episode(self, episode):
         self.episode = episode
@@ -166,7 +167,7 @@ class Estimater():
     def predict(self, state, suggest_command=None):
         result = self.q_func(Variable(torch.from_numpy(state))).data.numpy()
         command, best_act, reward_rate = self.parse_result_to_command(result, suggest_command)
-        return command, best_act, reward_rate
+        return command, best_act, reward_rate, result
     
     def parse_result_to_command(self, result, suggest_command=None):
         best_act, splited_result = self.inference_split(result, suggest_command)
